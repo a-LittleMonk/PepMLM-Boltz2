@@ -135,6 +135,22 @@ assert nums == list(range(1, 11)), nums
 assert gemmi.one_letter_code([r.name for r in tpl[0]["A"]]).upper() == AA1
 ok("template is written as chain A renumbered 1..10, sequence unchanged")
 
+# Boltz reads the template through make_structure_from_block and aligns the chain
+# against the entity's sequence record. gemmi's setup_entities leaves that record
+# empty, which made Boltz refuse every design with an IndexError.
+_b = gemmi.make_structure_from_block(gemmi.cif.read(ns["TPL"])[0])
+_b.merge_chain_parts()
+_b.remove_empty_chains()
+_fs = [gemmi.Entity.first_mon(x) for x in _b.entities[0].full_sequence]
+assert len(_fs) == 10, f"template sequence record holds {len(_fs)} residues, not 10"
+_al = gemmi.align_sequence_to_polymer(_fs, [x for x in _b[0].subchains()][0],
+                                      gemmi.PolymerType.PeptideL,
+                                      gemmi.AlignmentScoring())
+assert len(_al.match_string) == 10, _al.match_string
+for j in range(len(_al.match_string)):
+    _fs[j]          # this is the exact line that used to raise IndexError
+ok("template carries its sequence record, so Boltz's alignment walks it cleanly")
+
 # ============================================== 2. the Boltz YAML
 print("\n2. the YAML handed to Boltz-2")
 T = {"msa": "/content/pepmlm/receptor_msa.csv",

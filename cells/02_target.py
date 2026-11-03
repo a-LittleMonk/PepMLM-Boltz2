@@ -156,9 +156,30 @@ for i, (_lab, _let, r) in enumerate(res, start=1):
 m.add_chain(c)
 tpl.add_model(m)
 tpl.setup_entities()
+# setup_entities leaves _entity_poly with no sequence, and Boltz aligns the chain
+# against that sequence. Against an empty one it runs off the end of the list with
+# "IndexError: list index out of range" and silently skips every single design.
+for ent in tpl.entities:
+    if ent.entity_type == gemmi.EntityType.Polymer:
+        ent.full_sequence = [r.name for r in c]
+tpl.assign_label_seq_id()
 TPL = f"{WORK}/receptor.cif"
 tpl.make_mmcif_document().write_file(TPL)
-print(f"\ntemplate written, chain A renumbered 1..{len(res)}")
+
+# Read it back exactly as Boltz will, and run the alignment it runs.
+_chk = gemmi.make_structure_from_block(gemmi.cif.read(TPL)[0])
+_chk.merge_chain_parts()
+_chk.remove_empty_chains()
+_fs = [gemmi.Entity.first_mon(x) for x in _chk.entities[0].full_sequence]
+assert len(_fs) == len(res), (
+    f"the template kept only {len(_fs)} of {len(res)} residues in its sequence "
+    f"record; Boltz would refuse every design. Report this with your input file.")
+_al = gemmi.align_sequence_to_polymer(
+    _fs, [x for x in _chk[0].subchains()][0], gemmi.PolymerType.PeptideL,
+    gemmi.AlignmentScoring())
+assert len(_al.match_string) <= len(_fs), (
+    "the template's sequence and its coordinates disagree, so Boltz would refuse it")
+print(f"\ntemplate written and verified, chain A renumbered 1..{len(res)}")
 
 # ------------------------------------------------------------------ 6. MSA + apo
 H = hashlib.md5(SEQ.encode()).hexdigest()[:12]

@@ -208,7 +208,7 @@ for ci, ch in enumerate(chunks):
         print(f"chunk {ci + 1}/{len(chunks)}: {len(ch) - have} to run ...", flush=True)
         p = subprocess.Popen(cmd, env=BENV, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True, bufsize=1)
-        tail, w = [], 0
+        tail, w, refused, shown = [], 0, [], 0
         for line in p.stdout:
             tail.append(line.rstrip())
             tail[:] = tail[-60:]
@@ -219,10 +219,21 @@ for ci, ch in enumerate(chunks):
                 w = max(w, len(txt))
                 sys.stdout.write("\r" + txt.ljust(w))
                 sys.stdout.flush()
-            elif "rror" in s or "Traceback" in s:
+            elif "Failed to process" in s:
+                # one per refused input; the reason is on the same line
+                refused.append(s.split("Error:")[-1].strip().rstrip(".") or s)
+            elif "Traceback" in s or s.split(":")[0].endswith("Error"):
+                pass                      # already counted above, and very repetitive
+            elif "rror" in s and shown < 5:
+                shown += 1
                 sys.stdout.write("\n    " + s + "\n")
         p.wait()
         sys.stdout.write("\n")
+        if refused:
+            from collections import Counter
+            print(f"    Boltz refused {len(refused)} of {len(ch)} input file(s):")
+            for why, n in Counter(refused).most_common(3):
+                print(f"      {n} x  {why}")
         if p.returncode != 0:
             print("\n".join(tail))
             raise RuntimeError(
@@ -234,6 +245,15 @@ for ci, ch in enumerate(chunks):
         r = collect(pid, pred, int(df.loc[df.peptide_id == pid, "length"].iloc[0]))
         if r:
             got[pid] = r
+    if not got:
+        # Stop here rather than march through every chunk producing nothing.
+        print("\n".join(tail[-25:]) if "tail" in dir() else "")
+        raise RuntimeError(
+            f"none of the {len(ch)} designs in chunk {ci} produced output.\n"
+            f"  Boltz's own last lines are above. The inputs it read are in {d},\n"
+            f"  and a single one can be retried by hand with:\n"
+            f"    !{E['env']}/bin/boltz predict {d}/{ch[0]}.yaml --out_dir /content/try "
+            f"--cache {E['cache']}")
     for pid, r in got.items():
         for k, v in r.items():
             if k not in df.columns:
@@ -256,6 +276,7 @@ if int(ok.sum()) < len(ids):
 cols = [c for c in ["peptide_id", "length", "sequence", "perplexity", "iptm_pair",
                     "ipae", "pep_plddt", "hotspot_contacts", "hotspot_fraction"]
         if c in df.columns]
-print("\nbest 10 by interface ipTM:")
-print(df[ok].nlargest(10, "iptm_pair")[cols].to_string(index=False))
+if int(ok.sum()) and "iptm_pair" in df.columns:
+    print("\nbest 10 by interface ipTM:")
+    print(df[ok].nlargest(10, "iptm_pair")[cols].to_string(index=False))
 print(f"\nstructures -> My Drive/{E['drive_folder']}/{T['run']}/structures/")
