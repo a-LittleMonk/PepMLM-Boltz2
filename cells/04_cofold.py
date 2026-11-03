@@ -187,6 +187,20 @@ def collect(pid, pred_dir, L):
 
 # --------------------------------------------------------- run
 _PROG = re.compile(r"(Predicting|Generating|Processing).*?(\d+)%")
+_NUM = ["iptm", "iptm_pair", "ptm", "confidence_score", "complex_plddt",
+        "complex_iplddt", "complex_ipde", "pep_plddt", "ipae", "n_contact_res",
+        "hotspot_contacts", "hotspot_fraction", "receptor_rmsd"]
+
+
+def tidy(d):
+    """Columns created empty and filled in later stay a generic object dtype, which
+    pandas will not sort or rank on. Give them their real types back."""
+    for c in _NUM:
+        if c in d.columns:
+            d[c] = pd.to_numeric(d[c], errors="coerce")
+    if "cofolded" in d.columns:
+        d["cofolded"] = d["cofolded"].eq(True)
+    return d
 done_before = int(df.get("cofolded", pd.Series(dtype=bool)).fillna(False).sum()) \
     if "cofolded" in df else 0
 _depth = max(sum(1 for _ in open(T["msa"])) - 1, 0)
@@ -275,6 +289,7 @@ for ci, ch in enumerate(chunks):
             if k not in df.columns:
                 df[k] = pd.NA
             df.loc[df.peptide_id == pid, k] = v
+    df = tidy(df)
     df.to_csv(f"{WORK}/master.csv", index=False)
     df.to_csv(f"{OUT}/master.csv", index=False)
     finished += len(got)
@@ -285,7 +300,8 @@ for ci, ch in enumerate(chunks):
           f"{el / 60:.0f} min elapsed"
           + (f", ~{max(left, 0) * rate / 60:.0f} min left" if left > 0 else ""))
 
-ok = df["cofolded"].fillna(False).astype(bool) if "cofolded" in df else pd.Series(False, index=df.index)
+df = tidy(df)
+ok = df["cofolded"] if "cofolded" in df else pd.Series(False, index=df.index)
 print(f"\ncofolded {int(ok.sum())} of {len(ids)} in {(time.time() - t0) / 60:.1f} min")
 if int(ok.sum()) < len(ids):
     print("   some designs produced no output; re-running this cell retries only those")

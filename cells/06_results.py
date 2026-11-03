@@ -18,8 +18,9 @@ if which.startswith("passing"):
     assert len(d), "final.csv is empty -- loosen the gates in step 5"
 else:
     d = pd.read_csv(f"{WORK}/master.csv")
-    d = d[d["cofolded"].fillna(False).astype(bool)].sort_values(
-        "iptm_pair", ascending=False).reset_index(drop=True)
+    d = d[d["cofolded"].eq(True)].copy()
+    d["iptm_pair"] = pd.to_numeric(d["iptm_pair"], errors="coerce")
+    d = d.sort_values("iptm_pair", ascending=False).reset_index(drop=True)
     d.insert(0, "rank", range(1, len(d) + 1))
 
 i = max(1, min(int(rank), len(d))) - 1

@@ -312,4 +312,28 @@ assert _c4.index('"Failed to process" in s') < _c4.index("_PROG.search(s)"), \
     "the refusal check must come before the progress-bar check"
 ok("a refusal appended to the end of a tqdm progress line is still counted")
 
+# ============================================== 6. dtypes of the results table
+print("\n6. the results table's column types")
+_c4src = io.open(os.path.join(CELLS, "04_cofold.py"), encoding="utf-8").read()
+_n4 = {"pd": pd, "np": np, "re": re}
+exec(_c4src[_c4src.index("_PROG = re.compile"):_c4src.index("done_before =")], _n4)
+_t = pd.DataFrame({"peptide_id": ["a", "b", "c"], "length": [12, 13, 14]})
+for _pid, _v in (("a", 0.81), ("b", 0.42)):      # c is deliberately never cofolded
+    for _k, _val in (("cofolded", True), ("iptm_pair", _v), ("ipae", 5.0)):
+        if _k not in _t.columns:
+            _t[_k] = pd.NA
+        _t.loc[_t.peptide_id == _pid, _k] = _val
+try:
+    _t.nlargest(2, "iptm_pair")
+    raise AssertionError("object dtype should not have been rankable")
+except TypeError:
+    pass
+_t = _n4["tidy"](_t)
+assert str(_t["iptm_pair"].dtype) == "float64", _t["iptm_pair"].dtype
+assert str(_t["cofolded"].dtype) == "bool", _t["cofolded"].dtype
+_top = _t[_t["cofolded"]].nlargest(2, "iptm_pair")
+assert list(_top["peptide_id"]) == ["a", "b"], list(_top["peptide_id"])
+assert int(_t["cofolded"].sum()) == 2
+ok("metric columns become numeric, so ranking works and uncofolded rows stay out")
+
 print("\nall checks passed")

@@ -33,13 +33,19 @@ T = json.load(open("/content/pepmlm/target.json"))
 WORK, OUT = E["work"], T["out"]
 df = pd.read_csv(f"{WORK}/master.csv")
 assert "cofolded" in df.columns, "run step 4 first"
-d = df[df["cofolded"].fillna(False).astype(bool)].copy()
+d = df[df["cofolded"].eq(True)].copy()
 assert len(d), "nothing has been cofolded yet"
+
+for c in ("iptm", "iptm_pair", "ptm", "confidence_score", "complex_plddt",
+          "complex_iplddt", "complex_ipde", "pep_plddt", "ipae", "n_contact_res",
+          "hotspot_contacts", "hotspot_fraction", "receptor_rmsd"):
+    if c in d.columns:
+        d[c] = pd.to_numeric(d[c], errors="coerce")
 
 # plddt is reported on 0-1 by Boltz; tolerate a 0-100 file
 for c in ("pep_plddt", "complex_plddt", "complex_iplddt"):
-    if c in d.columns and pd.to_numeric(d[c], errors="coerce").max() > 1.5:
-        d[c] = pd.to_numeric(d[c], errors="coerce") / 100.0
+    if c in d.columns and d[c].max() > 1.5:
+        d[c] = d[c] / 100.0
 
 # ------------------------------------------------------------ sequence properties
 KD = dict(A=1.8, R=-4.5, N=-3.5, D=-3.5, C=2.5, Q=-3.5, E=-3.5, G=-0.4, H=-3.2,
