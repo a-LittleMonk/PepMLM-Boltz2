@@ -213,15 +213,15 @@ for ci, ch in enumerate(chunks):
             tail.append(line.rstrip())
             tail[:] = tail[-60:]
             s = line.strip()
-            m = _PROG.search(s)
-            if m:
+            # tqdm writes its bar with a bare \r, so a failure message often arrives
+            # appended to the end of a progress line. Check for it first.
+            if "Failed to process" in s:
+                refused.append(s.split("Error:")[-1].strip().rstrip(".") or s)
+            elif _PROG.search(s):
                 txt = f"    {s[:110]}"
                 w = max(w, len(txt))
                 sys.stdout.write("\r" + txt.ljust(w))
                 sys.stdout.flush()
-            elif "Failed to process" in s:
-                # one per refused input; the reason is on the same line
-                refused.append(s.split("Error:")[-1].strip().rstrip(".") or s)
             elif "Traceback" in s or s.split(":")[0].endswith("Error"):
                 pass                      # already counted above, and very repetitive
             elif "rror" in s and shown < 5:

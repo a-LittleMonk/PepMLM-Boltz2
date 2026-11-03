@@ -162,14 +162,30 @@ tpl.setup_entities()
 for ent in tpl.entities:
     if ent.entity_type == gemmi.EntityType.Polymer:
         ent.full_sequence = [r.name for r in c]
+# Boltz names a template's chains by their mmCIF subchain (label_asym_id), not by the
+# chain name, and gemmi invents subchain labels like "Axp" -- which Boltz then rejects
+# with "Template chain A ... is not one of the protein chains!". Make them match.
+for ch in tpl[0]:
+    for r in ch:
+        r.subchain = ch.name
+for ent in tpl.entities:
+    ent.subchains = ["A"]
 tpl.assign_label_seq_id()
 TPL = f"{WORK}/receptor.cif"
 tpl.make_mmcif_document().write_file(TPL)
 
-# Read it back exactly as Boltz will, and run the alignment it runs.
+# Read it back exactly as Boltz will, and run the same checks it runs.
 _chk = gemmi.make_structure_from_block(gemmi.cif.read(TPL)[0])
 _chk.merge_chain_parts()
+_chk.remove_waters()
 _chk.remove_empty_chains()
+_subs = [x.subchain_id() for x in _chk[0].subchains()]
+_emap = {sc: e for e in _chk.entities for sc in e.subchains}
+assert "A" in _subs, (
+    f"the template's chain is labelled {_subs} rather than ['A'], so Boltz would "
+    f"refuse it. Report this with your input file.")
+assert all(s in _emap for s in _subs), (
+    f"the template's chains {_subs} are not all in its entity records {list(_emap)}")
 _fs = [gemmi.Entity.first_mon(x) for x in _chk.entities[0].full_sequence]
 assert len(_fs) == len(res), (
     f"the template kept only {len(_fs)} of {len(res)} residues in its sequence "

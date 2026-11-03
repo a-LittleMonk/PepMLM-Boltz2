@@ -141,6 +141,13 @@ ok("template is written as chain A renumbered 1..10, sequence unchanged")
 _b = gemmi.make_structure_from_block(gemmi.cif.read(ns["TPL"])[0])
 _b.merge_chain_parts()
 _b.remove_empty_chains()
+# Boltz matches a template's chains by subchain (label_asym_id); gemmi would call
+# this "Axp" and Boltz refuses anything that is not the name in the YAML.
+_subs = [x.subchain_id() for x in _b[0].subchains()]
+assert _subs == ["A"], f"template subchain is {_subs}, Boltz needs ['A']"
+_emap = {sc: e.name for e in _b.entities for sc in e.subchains}
+assert all(s in _emap for s in _subs), f"{_subs} not in entity records {_emap}"
+ok("template subchain is 'A' and its entity record agrees, so Boltz accepts it")
 _fs = [gemmi.Entity.first_mon(x) for x in _b.entities[0].full_sequence]
 assert len(_fs) == 10, f"template sequence record holds {len(_fs)} residues, not 10"
 _al = gemmi.align_sequence_to_polymer(_fs, [x for x in _b[0].subchains()][0],
@@ -297,5 +304,12 @@ for want in ["N-terminal Gln", "Asp-Pro", "Asn-Gly", "Asp-Gly", "Met",
     assert want in flags, f"{want} not flagged in '{flags}'"
 assert nsF2["d"].loc[0, "failed"] == "liabilities"
 ok("all seven sequence liabilities are detected and can gate")
+
+# ============================================== 5. output parsing order
+print("\n5. step 4's reading of Boltz's output")
+_c4 = io.open(os.path.join(CELLS, "04_cofold.py"), encoding="utf-8").read()
+assert _c4.index('"Failed to process" in s') < _c4.index("_PROG.search(s)"), \
+    "the refusal check must come before the progress-bar check"
+ok("a refusal appended to the end of a tqdm progress line is still counted")
 
 print("\nall checks passed")
