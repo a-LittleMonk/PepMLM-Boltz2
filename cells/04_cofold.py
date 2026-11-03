@@ -18,6 +18,12 @@ pocket_force = False  #@param {type:"boolean"}
 contact_cutoff = 4.5  #@param {type:"number"}
 patch_radius = 10.0  #@param {type:"number"}
 chunk_size = 25  #@param {type:"integer"}
+#@markdown How many alignment sequences each design is folded against. Boltz's own
+#@markdown help text says it subsamples to 1024 by default, but the flag that does it
+#@markdown defaults to off, so without this it uses up to 8192 — several times the
+#@markdown work for very little gain. Untick only if you want upstream's raw behaviour.
+subsample_msa = True  #@param {type:"boolean"}
+msa_depth = 1024  #@param {type:"integer"}
 redo = False  #@param {type:"boolean"}
 
 import glob, json, os, re, shutil, subprocess, sys, time
@@ -183,8 +189,16 @@ def collect(pid, pred_dir, L):
 _PROG = re.compile(r"(Predicting|Generating|Processing).*?(\d+)%")
 done_before = int(df.get("cofolded", pd.Series(dtype=bool)).fillna(False).sum()) \
     if "cofolded" in df else 0
+_depth = max(sum(1 for _ in open(T["msa"])) - 1, 0)
 print(f"\n{len(ids)} design(s) in {len(chunks)} chunk(s) of {chunk_size}; "
-      f"{done_before} already done in master.csv\n")
+      f"{done_before} already done in master.csv")
+print(f"alignment depth {_depth:,}"
+      + (f", subsampled to {int(msa_depth):,}" if subsample_msa and _depth > msa_depth
+         else "")
+      + f"   |   {int(sampling_steps)} sampling steps, "
+        f"{int(recycling_steps)} recycles, {int(diffusion_samples)} sample(s)")
+print("the progress bar only moves when a design finishes, so it sits at 0% through "
+      "the first one\n")
 
 t0, finished = time.time(), 0
 for ci, ch in enumerate(chunks):
@@ -201,6 +215,8 @@ for ci, ch in enumerate(chunks):
                "--diffusion_samples", str(int(diffusion_samples)),
                "--output_format", "mmcif", "--write_full_pae",
                "--num_workers", "2", "--preprocessing-threads", "2"]
+        if subsample_msa:
+            cmd += ["--subsample_msa", "--num_subsampled_msa", str(int(msa_depth))]
         if pocket_force:
             cmd.append("--use_potentials")
         if not E["kernels"]:
