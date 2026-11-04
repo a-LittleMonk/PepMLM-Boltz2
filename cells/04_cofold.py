@@ -58,6 +58,20 @@ if HOT:
 else:
     print("no hotspots: Boltz will place the peptide wherever it prefers")
 
+def recover(name):
+    """A new runtime starts with an empty /content, but the tables live in Drive.
+    Bring one back rather than making you regenerate it."""
+    local, saved = f"{WORK}/{name}", f"{OUT}/{name}"
+    if not os.path.isfile(local) and os.path.isfile(saved):
+        os.makedirs(WORK, exist_ok=True)
+        shutil.copyfile(saved, local)
+        print(f"recovered {name} from My Drive/{E['drive_folder']}/{T['run']}/")
+    return local
+
+
+assert os.path.isfile(recover("master.csv")), (
+    f"no master.csv, here or in My Drive/{E['drive_folder']}"
+    f"/{T['run']}/ -- run step 3 to generate the peptides")
 df = pd.read_csv(f"{WORK}/master.csv")
 todo = df[df["selected"]].copy()
 assert len(todo), "step 3 selected nothing to cofold"

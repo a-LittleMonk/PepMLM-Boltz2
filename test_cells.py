@@ -397,7 +397,7 @@ ok("re-measured values overwrite step 4's, and uncofolded rows stay empty")
 print("\n9. step 4 resolves its own steering hotspots")
 _c4 = io.open(os.path.join(CELLS, "04_cofold.py"), encoding="utf-8").read()
 _blk = _c4[_c4.index("# Hotspots, in your own numbering"):
-           _c4.index('df = pd.read_csv(f"{WORK}/master.csv")')]
+           _c4.index("def recover(name):")]
 
 
 def steer(text):
@@ -465,5 +465,30 @@ assert os.path.isdir(_pred + "/good"), "a finished design must be kept"
 assert not os.path.isdir(_pred + "/cut_off"), "the half-written folder must be removed"
 ok("an interrupted design's empty folder is deleted, so Boltz retries it")
 ok("a finished design keeps its folder and is skipped")
+
+# ============================================== 11. recovering the table from Drive
+print("")
+print("11. a fresh session recovers master.csv from Drive")
+_rc = io.open(os.path.join(CELLS, "04_cofold.py"), encoding="utf-8").read()
+_blk = _rc[_rc.index("def recover(name):"):_rc.index('assert os.path.isfile(recover(')]
+_w, _o = TMP + "/fresh_work", TMP + "/fresh_drive"
+os.makedirs(_o, exist_ok=True)
+io.open(_o + "/master.csv", "w").write("peptide_id,selected" + chr(10) + "p0,True" + chr(10))
+_nr = {"os": os, "shutil": __import__("shutil"), "WORK": _w, "OUT": _o,
+       "E": {"drive_folder": "PepMLM"}, "T": {"run": "demo"},
+       "print": lambda *a, **k: None}
+exec(_blk, _nr)
+assert not os.path.isdir(_w), "nothing should exist before the call"
+assert _nr["recover"]("master.csv") == _w + "/master.csv"
+assert os.path.isfile(_w + "/master.csv"), "the Drive copy was not brought back"
+ok("with /content empty, the Drive copy is restored, so step 3 can be skipped")
+
+io.open(_w + "/master.csv", "w").write("peptide_id,selected" + chr(10) + "local,True" + chr(10))
+_nr["recover"]("master.csv")
+assert "local" in io.open(_w + "/master.csv").read(), "a local file must not be clobbered"
+ok("an existing local table is left alone, never overwritten by the Drive copy")
+
+assert not os.path.isfile(_nr["recover"]("final.csv")), "must not invent a missing file"
+ok("a table that exists in neither place is simply reported missing")
 
 print("\nall checks passed")

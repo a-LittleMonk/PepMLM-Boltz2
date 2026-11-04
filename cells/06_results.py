@@ -5,7 +5,7 @@ rank = 1  #@param {type:"integer"}
 colour_by = "pLDDT"  #@param ["pLDDT", "plain"]
 show_contacts = True  #@param {type:"boolean"}
 
-import json, os
+import json, os, shutil
 import pandas as pd
 import py3Dmol
 
@@ -16,10 +16,23 @@ WORK, OUT = E["work"], T["out"]
 _fs = f"{OUT}/filter_settings.json"
 HOT = json.load(open(_fs)).get("hotspots_idx", []) if os.path.isfile(_fs) else []
 
+def recover(name):
+    """A new runtime starts with an empty /content, but the tables live in Drive.
+    Bring one back rather than making you regenerate it."""
+    local, saved = f"{WORK}/{name}", f"{OUT}/{name}"
+    if not os.path.isfile(local) and os.path.isfile(saved):
+        os.makedirs(WORK, exist_ok=True)
+        shutil.copyfile(saved, local)
+        print(f"recovered {name} from My Drive/{E['drive_folder']}/{T['run']}/")
+    return local
+
+
 if which.startswith("passing"):
+    assert os.path.isfile(recover("final.csv")), "run step 5 first"
     d = pd.read_csv(f"{WORK}/final.csv")
     assert len(d), "final.csv is empty -- loosen the gates in step 5"
 else:
+    assert os.path.isfile(recover("master.csv")), "run steps 3 and 4 first"
     d = pd.read_csv(f"{WORK}/master.csv")
     d = d[d["cofolded"].eq(True)].copy()
     d["iptm_pair"] = pd.to_numeric(d["iptm_pair"], errors="coerce")
