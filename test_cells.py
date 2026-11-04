@@ -272,7 +272,7 @@ rows = [
 d = pd.DataFrame([{"peptide_id": r[0], "iptm_pair": r[1], "ipae": r[2],
                    "pep_plddt": r[3], "hotspot_contacts": r[4],
                    "hotspot_fraction": r[5], "sequence": r[6]} for r in rows])
-nsF = {"pd": pd, "np": np, "re": re, "d": d, "T": {"hotspots_idx": [4, 5]},
+nsF = {"pd": pd, "np": np, "re": re, "d": d, "T": {"hotspots_idx": [4, 5]}, "HOT": [4, 5],
        "min_iptm": 0.6, "max_ipae": 10.0, "min_pep_plddt": 0.7,
        "max_receptor_rmsd": 0.0, "min_hotspot_contacts": 2,
        "min_hotspot_fraction": 0.6, "max_cys": 1, "charge_min": -3.0,
@@ -335,5 +335,68 @@ _top = _t[_t["cofolded"]].nlargest(2, "iptm_pair")
 assert list(_top["peptide_id"]) == ["a", "b"], list(_top["peptide_id"])
 assert int(_t["cofolded"].sum()) == 2
 ok("metric columns become numeric, so ranking works and uncofolded rows stay out")
+
+# ============================================== 7. hotspots set in the filter cell
+print("\n7. changing hotspots in the filter, without refolding")
+_T = {"labels": LABELS, "seq": AA1, "hotspots_idx": [2, 8],
+      "template": ns["TPL"], "out": TMP}
+
+
+def resolve(text):
+    n = {"T": _T, "hotspots": text, "print": lambda *a, **k: None}
+    exec(slice_of("05_filter.py", 'LAB = T["labels"]',
+                  "# ------------------------------------------------------------ "
+                  "re-measure"), n)
+    return n["HOT"]
+
+
+assert resolve("") == [2, 8], resolve("")
+ok("empty field falls back to step 2's hotspots")
+assert resolve("19,20A,43") == [3, 5, 10], resolve("19,20A,43")
+ok("an override maps your own numbering, insertion code included, to 3, 5 and 10")
+try:
+    resolve("999")
+    raise AssertionError("should have refused a residue outside the target")
+except AssertionError as e:
+    if "should have" in str(e):
+        raise
+ok("refuses a residue the target does not contain")
+
+os.makedirs(TMP + "/structures", exist_ok=True)
+complex_cif(TMP + "/structures/p1.cif", [4, 5, 6])
+nsM = {"gemmi": gemmi, "np": np, "os": os, "contact_cutoff": 4.5,
+       "HOT": [4, 5], "PATCH": {3, 4, 5, 6}}
+exec(slice_of("05_filter.py", "def measure(cif):",
+              'for c in ("n_contact_res", "contact_residues"'), nsM)
+r1 = nsM["measure"](TMP + "/structures/p1.cif")
+assert r1["hotspot_contacts"] == 2 and r1["hotspot_fraction"] == 1.0, r1
+nsM["HOT"], nsM["PATCH"] = [9, 10], {8, 9, 10}
+r2 = nsM["measure"](TMP + "/structures/p1.cif")
+assert r2["hotspot_contacts"] == 0 and r2["hotspot_fraction"] == 0.0, r2
+ok("one structure scores 2/1.0 against one hotspot pair and 0/0.0 against another")
+nsM["HOT"], nsM["PATCH"], nsM["contact_cutoff"] = [4, 5], {3, 4, 5, 6}, 1.0
+assert nsM["measure"](TMP + "/structures/p1.cif")["n_contact_res"] == 0
+ok("tightening the contact cutoff to 1 A removes every contact, as it must")
+
+# ============================================== 8. master.csv keeps every peptide
+print("\n8. master.csv is not trimmed by filtering")
+_df = pd.DataFrame({"peptide_id": ["p0", "p1", "p2", "p3", "p4"],
+                    "sequence": ["AAAA"] * 5,
+                    "selected": [True, True, False, False, False],
+                    "cofolded": [True, True, False, False, False],
+                    "iptm_pair": [0.8, 0.4, None, None, None]})
+_d = _df[_df["cofolded"].eq(True)].copy()
+_d["failed"] = ["", "iptm"]
+_d["pass_all"] = [True, False]
+_d["iptm_pair"] = [0.81, 0.42]            # as though re-measured in the filter
+_n8 = {"df": _df, "d": _d, "pd": pd, "final": _d, "OUT": TMP, "WORK": TMP}
+exec(slice_of("05_filter.py", "_full = df.set_index", '_full.to_csv(f"{WORK}'), _n8)
+_out = _n8["_full"]
+assert len(_out) == 5, "master lost rows: " + str(len(_out))
+ok("all 5 generated peptides survive, not just the 2 that were cofolded")
+assert list(_out["failed"].fillna("")) == ["", "iptm", "", "", ""]
+ok("the filter's new columns are merged onto the cofolded rows only")
+assert _out.set_index("peptide_id").at["p0", "iptm_pair"] == 0.81
+ok("re-measured values overwrite step 4's, and uncofolded rows stay empty")
 
 print("\nall checks passed")

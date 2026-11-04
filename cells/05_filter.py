@@ -1,7 +1,8 @@
 #@title 5 &middot; Filter { display-mode: "form" }
-#@markdown Re-run this as often as you like — it only reads `master.csv`, so changing a
-#@markdown threshold costs nothing. Every design keeps a `failed` column saying which
-#@markdown gates it missed.
+#@markdown Re-run this as often as you like. It refolds nothing: every number it
+#@markdown needs is already in `master.csv` or in the saved structures, so even
+#@markdown changing the hotspots here is free. Each design keeps a `failed`
+#@markdown column naming the gates it missed.
 #@markdown
 #@markdown **Structure gates.** ipTM is the interface confidence for the
 #@markdown receptor-peptide pair; ipAE is the interface error in angstroms and is the
@@ -16,6 +17,14 @@ max_receptor_rmsd = 0.0  #@param {type:"number"}
 #@markdown binds confidently to the wrong face.
 min_hotspot_contacts = 2  #@param {type:"integer"}
 min_hotspot_fraction = 0.6  #@param {type:"number"}
+#@markdown Leave `hotspots` empty to use the ones from step 2. Fill it in to ask a
+#@markdown different question of the same designs — in **your file's own numbering**,
+#@markdown e.g. `40,99,107`. Nothing is refolded: the contacts are re-measured from the
+#@markdown structures already saved, so `patch_radius` and `contact_cutoff` work here
+#@markdown too.
+hotspots = ""  #@param {type:"string"}
+patch_radius = 10.0  #@param {type:"number"}
+contact_cutoff = 4.5  #@param {type:"number"}
 #@markdown **Sequence gates**, for whether you can actually make the peptide.
 max_cys = 1  #@param {type:"integer"}
 charge_min = -3.0  #@param {type:"number"}
@@ -25,6 +34,7 @@ drop_liabilities = False  #@param {type:"boolean"}
 rank_by = "iptm_pair"  #@param ["iptm_pair", "ipae", "confidence_score", "perplexity", "pep_plddt"]
 
 import json, os, re, shutil
+import gemmi
 import numpy as np
 import pandas as pd
 
@@ -46,6 +56,86 @@ for c in ("iptm", "iptm_pair", "ptm", "confidence_score", "complex_plddt",
 for c in ("pep_plddt", "complex_plddt", "complex_iplddt"):
     if c in d.columns and d[c].max() > 1.5:
         d[c] = d[c] / 100.0
+
+# ------------------------------------------------------------ hotspots
+LAB = T["labels"]
+_given = [x for x in hotspots.replace(" ", "").split(",") if x]
+if _given:
+    _ix = {lab: i + 1 for i, lab in enumerate(LAB)}
+    _miss = [p for p in _given if p not in _ix]
+    assert not _miss, (
+        f"residue(s) {_miss} are not in the target step 2 built. Its numbering runs "
+        f"{LAB[0]} .. {LAB[-1]}, and a crop in step 2 may have removed them.")
+    HOT = [_ix[p] for p in _given]
+    print("hotspots for this filter, overriding step 2:")
+    for p, i in zip(_given, HOT):
+        print(f"   {p:>6s}  ->  {T['seq'][i - 1]}{i}")
+else:
+    HOT = T["hotspots_idx"]
+
+# ------------------------------------------------------------ re-measure geometry
+# Done here rather than reused from step 4, so the hotspots, the patch radius and the
+# contact cutoff can all be changed without refolding a single design.
+PATCH = set()
+if HOT and T["template"] and os.path.isfile(T["template"]):
+    _t = gemmi.read_structure(T["template"])
+    _ca = {}
+    for r in _t[0]["A"]:
+        a = r.find_atom("CA", "*")
+        if a:
+            _ca[r.seqid.num] = np.array([a.pos.x, a.pos.y, a.pos.z])
+    _h = np.array([_ca[i] for i in HOT if i in _ca])
+    if len(_h):
+        PATCH = {i for i, p in _ca.items()
+                 if np.min(np.linalg.norm(_h - p, axis=1)) <= float(patch_radius)}
+
+
+def measure(cif):
+    st = gemmi.read_structure(cif)
+    st.remove_hydrogens()
+    ch = {c.name: c for c in st[0]}
+    if "A" not in ch or "B" not in ch:
+        return None
+    ra, rid = [], []
+    for r in ch["A"]:
+        for a in r:
+            ra.append([a.pos.x, a.pos.y, a.pos.z])
+            rid.append(r.seqid.num)
+    pb = [[a.pos.x, a.pos.y, a.pos.z] for r in ch["B"] for a in r]
+    if not ra or not pb:
+        return None
+    ra, pb, rid = np.array(ra), np.array(pb), np.array(rid)
+    dist = np.linalg.norm(ra[:, None, :] - pb[None, :, :], axis=-1)
+    touched = sorted({int(x) for x in rid[(dist <= float(contact_cutoff)).any(axis=1)]})
+    return {"n_contact_res": len(touched),
+            "contact_residues": ";".join(str(x) for x in touched),
+            "hotspot_contacts": len([i for i in HOT if i in touched]),
+            "hotspot_fraction": (round(len([i for i in touched if i in PATCH])
+                                       / len(touched), 3)
+                                 if touched and PATCH else 0.0)}
+
+
+for c in ("n_contact_res", "contact_residues", "hotspot_contacts",
+          "hotspot_fraction"):
+    if c not in d.columns:
+        d[c] = pd.NA
+d["contact_residues"] = d["contact_residues"].astype("object")
+_done = 0
+for i in d.index:
+    _cif = f"{OUT}/structures/{d.at[i, 'peptide_id']}.cif"
+    _m = measure(_cif) if os.path.isfile(_cif) else None
+    if _m:
+        for k, v in _m.items():
+            d.at[i, k] = v
+        _done += 1
+if _done:
+    print(f"re-measured {_done} design(s): contacts within {contact_cutoff} A, "
+          f"{len(HOT)} hotspot(s), {len(PATCH)} residue(s) in the patch")
+else:
+    print("no saved structures found, so step 4's contact numbers are used as they "
+          "are -- changing the hotspots or either radius here will do nothing")
+for c in ("n_contact_res", "hotspot_contacts", "hotspot_fraction"):
+    d[c] = pd.to_numeric(d[c], errors="coerce")
 
 # ------------------------------------------------------------ sequence properties
 KD = dict(A=1.8, R=-4.5, N=-3.5, D=-3.5, C=2.5, Q=-3.5, E=-3.5, G=-0.4, H=-3.2,
@@ -83,7 +173,7 @@ if "pep_plddt" in d.columns:
 if float(max_receptor_rmsd) > 0 and "receptor_rmsd" in d.columns:
     r = pd.to_numeric(d["receptor_rmsd"], errors="coerce")
     G.append(("receptor_moved", r.isna() | (r <= float(max_receptor_rmsd))))
-if T["hotspots_idx"]:
+if HOT:
     G.append(("hotspot_contacts",
               d["hotspot_contacts"].astype(float) >= int(min_hotspot_contacts)))
     G.append(("wrong_face",
@@ -137,7 +227,20 @@ else:
 
 final.to_csv(f"{OUT}/final.csv", index=False)
 final.to_csv(f"{WORK}/final.csv", index=False)
-d.to_csv(f"{OUT}/master.csv", index=False)
+
+# master.csv must keep EVERY generated peptide, so merge this cell's columns back into
+# the full table. Writing `d` here would silently drop every peptide that was never
+# selected for cofolding.
+_full = df.set_index("peptide_id")
+_sub = d.set_index("peptide_id")
+for c in _sub.columns:
+    if c not in _full.columns:
+        _full[c] = pd.NA
+_full.update(_sub)
+_full = _full.reset_index()
+assert len(_full) == len(df), f"master.csv would lose rows ({len(_full)} vs {len(df)})"
+_full.to_csv(f"{OUT}/master.csv", index=False)
+_full.to_csv(f"{WORK}/master.csv", index=False)
 json.dump({"min_iptm": float(min_iptm), "max_ipae": float(max_ipae),
            "min_pep_plddt": float(min_pep_plddt),
            "max_receptor_rmsd": float(max_receptor_rmsd),
@@ -147,6 +250,7 @@ json.dump({"min_iptm": float(min_iptm), "max_ipae": float(max_ipae),
            "max_gravy": float(max_gravy), "drop_liabilities": bool(drop_liabilities),
            "rank_by": rank_by, "n_pass": int(len(final))},
           open(f"{OUT}/filter_settings.json", "w"), indent=2)
-print(f"\nmaster.csv  {len(d)} cofolded designs, every metric, unfiltered")
+print(f"\nmaster.csv  {len(_full)} peptides generated, {len(d)} of them cofolded, "
+      f"every metric, unfiltered")
 print(f"final.csv   {len(final)} passing, ranked")
 print(f"both in My Drive/{E['drive_folder']}/{T['run']}/")
