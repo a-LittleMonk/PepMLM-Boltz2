@@ -31,7 +31,7 @@ subsample_msa = True  #@param {type:"boolean"}
 msa_depth = 1024  #@param {type:"integer"}
 redo = False  #@param {type:"boolean"}
 
-import glob, json, os, re, shutil, subprocess, sys, time
+import glob, hashlib, json, os, re, shutil, subprocess, sys, time
 import gemmi
 import numpy as np
 import pandas as pd
@@ -58,6 +58,16 @@ if HOT:
 else:
     print("no hotspots: Boltz will place the peptide wherever it prefers")
 
+# Everything that changes what a fold produces. Stored with each design, so a
+# changed setting is refolded instead of silently reusing the old structure.
+SIG = hashlib.md5(json.dumps(
+    {"hot": HOT, "dist": float(pocket_max_distance), "force": bool(pocket_force),
+     "steps": int(sampling_steps), "recycles": int(recycling_steps),
+     "samples": int(diffusion_samples), "tpl": bool(T["template"]),
+     "msa": [bool(subsample_msa), int(msa_depth)], "seq": T["seq"]},
+    sort_keys=True).encode()).hexdigest()[:10]
+
+
 def recover(name):
     """A new runtime starts with an empty /content, but the tables live in Drive.
     Bring one back rather than making you regenerate it."""
@@ -81,12 +91,22 @@ _want = len(todo)
 # and its structure is in Drive, so there is nothing to recompute. This is what makes
 # a fresh session cheap after a disconnect, since the local predictions are gone.
 if not redo and "cofolded" in df.columns:
-    _have = {p for p in df.loc[df["cofolded"].eq(True), "peptide_id"]
-             if os.path.isfile(f"{OUT}/structures/{p}.cif")}
-    if _have:
-        todo = todo[~todo["peptide_id"].isin(_have)]
-        print(f"{len(_have)} design(s) already folded and saved in Drive, skipping them"
-              f"{'  (tick redo to fold them again)' if len(_have) else ''}")
+    _sig = (df["fold_sig"].astype(str) if "fold_sig" in df.columns
+            else pd.Series("", index=df.index))
+    _done = df["cofolded"].eq(True)
+    _keep, _stale = set(), set()
+    for p, s, dn in zip(df["peptide_id"], _sig, _done):
+        if not dn or not os.path.isfile(f"{OUT}/structures/{p}.cif"):
+            continue
+        # "" means folded before this notebook recorded signatures: left alone
+        (_keep if s in (SIG, "", "nan") else _stale).add(p)
+    if _keep:
+        todo = todo[~todo["peptide_id"].isin(_keep)]
+        print(f"{len(_keep)} design(s) already folded and saved in Drive, skipping "
+              f"them  (tick redo to fold them again)")
+    if _stale:
+        print(f"{len(_stale)} design(s) were folded with different settings and will "
+              f"be folded again")
 if max_designs and len(todo) > int(max_designs):
     todo = todo.nsmallest(int(max_designs), "perplexity")
 
@@ -100,7 +120,7 @@ os.makedirs(CD, exist_ok=True)
 # --------------------------------------------------------- the hotspot patch
 # Receptor residues whose CA sits within patch_radius of any hotspot CA. A peptide
 # that contacts the receptor only outside this patch is binding the wrong face.
-_tpl = gemmi.read_structure(T["template"])
+_tpl = gemmi.read_structure(T.get("geom") or T["template"])
 _ca = {}
 for r in _tpl[0]["A"]:
     a = r.find_atom("CA", "*")
@@ -139,6 +159,9 @@ seqof = dict(zip(todo["peptide_id"], todo["sequence"]))
 for ci, ch in enumerate(chunks):
     d = f"{YD}/c{ci:03d}"
     os.makedirs(d, exist_ok=True)
+    for f in os.listdir(d):
+        if f.endswith(".yaml") and f[:-5] not in ch:
+            os.remove(f"{d}/{f}")      # boltz folds every yaml it finds in here
     for pid in ch:
         write_yaml(f"{d}/{pid}.yaml", seqof[pid])
 
@@ -167,7 +190,7 @@ def interface(cif, L):
     hit = rid[(d <= float(contact_cutoff)).any(axis=1)]
     touched = sorted(set(int(x) for x in hit))
     out = {"n_contact_res": len(touched),
-           "contact_residues": ";".join(str(x) for x in touched[:40])}
+           "contact_residues": ";".join(str(x) for x in touched)}
     out["hotspot_contacts"] = len([i for i in HOT if i in touched])
     out["hotspot_fraction"] = (round(len([i for i in touched if i in PATCH])
                                      / len(touched), 3) if touched and PATCH else 0.0)
@@ -190,6 +213,9 @@ def interface(cif, L):
         except Exception:
             pass
     return out
+
+
+_warn = set()
 
 
 def collect(pid, pred_dir, L):
@@ -219,6 +245,9 @@ def collect(pid, pred_dir, L):
             v = v / 100.0                      # some builds report pLDDT on 0-100
         if len(v) >= len(SEQ) + L:
             row["pep_plddt"] = round(float(np.mean(v[len(SEQ):len(SEQ) + L])), 4)
+        else:
+            _warn.add(f"pLDDT file has {len(v)} values, expected at least "
+                      f"{len(SEQ) + L}; peptide pLDDT unavailable")
     pa = f"{g}/pae_{pid}_model_0.npz"
     if os.path.isfile(pa):
         p = np.load(pa)["pae"]
@@ -226,8 +255,12 @@ def collect(pid, pred_dir, L):
         if p.shape[0] >= len(SEQ) + L:
             a, b = slice(0, len(SEQ)), slice(len(SEQ), len(SEQ) + L)
             row["ipae"] = round(float((p[a, b].mean() + p[b, a].mean()) / 2), 4)
+        else:
+            _warn.add(f"PAE matrix is {p.shape[0]} wide, expected at least "
+                      f"{len(SEQ) + L}; ipAE unavailable")
     row.update(interface(cif, L))
     row["cif_name"] = f"{pid}.cif"
+    row["fold_sig"] = SIG
     shutil.copyfile(cif, f"{OUT}/structures/{pid}.cif")
     return row
 
@@ -248,8 +281,7 @@ def tidy(d):
     if "cofolded" in d.columns:
         d["cofolded"] = d["cofolded"].eq(True)
     return d
-done_before = int(df.get("cofolded", pd.Series(dtype=bool)).fillna(False).sum()) \
-    if "cofolded" in df else 0
+done_before = int(df["cofolded"].eq(True).sum()) if "cofolded" in df else 0
 _depth = max(sum(1 for _ in open(T["msa"])) - 1, 0)
 print(f"\n{len(ids)} design(s) in {len(chunks)} chunk(s) of {chunk_size}; "
       f"{done_before} already done in master.csv")
@@ -268,6 +300,13 @@ for ci, ch in enumerate(chunks):
     # Boltz treats a design as done if its output FOLDER exists, without looking
     # inside. A run cut off mid-write leaves an empty folder, which it would then skip
     # for ever. Clear those out so an interrupted design is actually retried.
+    _sigf = f"{od}/.fold_sig"
+    if os.path.isfile(_sigf) and open(_sigf).read().strip() != SIG:
+        shutil.rmtree(od, ignore_errors=True)
+        print(f"chunk {ci + 1}: settings changed since these were folded, "
+              f"discarding them")
+    os.makedirs(od, exist_ok=True)
+    open(_sigf, "w").write(SIG)
     _part = [p for p in ch if os.path.isdir(f"{pred}/{p}")
              and not os.path.isfile(f"{pred}/{p}/confidence_{p}_model_0.json")]
     for p in _part:
@@ -365,6 +404,8 @@ print(f"\n{int(ok.sum())} of {_want} selected design(s) now have results"
 if int(ok.sum()) < _want:
     print(f"   {_want - int(ok.sum())} still missing. Re-run this cell: finished "
           f"designs are skipped and half-written ones are cleared and retried.")
+for _m in sorted(_warn):
+    print(f"   !! {_m}")
 cols = [c for c in ["peptide_id", "length", "sequence", "perplexity", "iptm_pair",
                     "ipae", "pep_plddt", "hotspot_contacts", "hotspot_fraction"]
         if c in df.columns]

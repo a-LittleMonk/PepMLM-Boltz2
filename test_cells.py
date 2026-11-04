@@ -84,7 +84,7 @@ BLOCK2 = slice_of("02_target.py", "st = gemmi.read_structure(src)",
 
 def run_target(crop, chain="A"):
     ns = {"gemmi": gemmi, "src": SRC, "target_chain": chain, "crop": crop,
-          "use_template": True, "WORK": TMP,
+          "use_template": True, "WORK": TMP, "re": re, "os": os,
           "print": lambda *a, **k: None}
     exec(BLOCK2, ns)
     return ns
@@ -397,7 +397,7 @@ ok("re-measured values overwrite step 4's, and uncofolded rows stay empty")
 print("\n9. step 4 resolves its own steering hotspots")
 _c4 = io.open(os.path.join(CELLS, "04_cofold.py"), encoding="utf-8").read()
 _blk = _c4[_c4.index("# Hotspots, in your own numbering"):
-           _c4.index("def recover(name):")]
+           _c4.index("# Everything that changes what a fold produces")]
 
 
 def steer(text):
@@ -433,16 +433,23 @@ os.makedirs(_rdir + "/structures", exist_ok=True)
 _df = pd.DataFrame({"peptide_id": ["p0", "p1", "p2"],
                     "selected": [True, True, True],
                     "cofolded": [True, True, False],
+                    "fold_sig": ["sig1", "sig1", ""],
                     "perplexity": [1.0, 2.0, 3.0]})
 io.open(_rdir + "/structures/p0.cif", "w").write("x")   # p1 has metrics but no file
 _n = {"df": _df, "todo": _df[_df["selected"]].copy(), "os": os, "redo": False,
-      "OUT": _rdir, "print": lambda *a, **k: None}
+      "pd": pd, "SIG": "sig1", "OUT": _rdir, "print": lambda *a, **k: None}
 exec(_skip, _n)
 assert list(_n["todo"]["peptide_id"]) == ["p1", "p2"], list(_n["todo"]["peptide_id"])
 ok("p0 is skipped; p1 is refolded because its structure is missing from Drive")
 
+_n2 = {"df": _df, "todo": _df[_df["selected"]].copy(), "os": os, "redo": False,
+       "pd": pd, "SIG": "sig2", "OUT": _rdir, "print": lambda *a, **k: None}
+exec(_skip, _n2)
+assert list(_n2["todo"]["peptide_id"]) == ["p0", "p1", "p2"],     list(_n2["todo"]["peptide_id"])
+ok("a changed fold signature refolds p0 instead of reusing its old structure")
+
 _n = {"df": _df, "todo": _df[_df["selected"]].copy(), "os": os, "redo": True,
-      "OUT": _rdir, "print": lambda *a, **k: None}
+      "pd": pd, "SIG": "sig1", "OUT": _rdir, "print": lambda *a, **k: None}
 exec(_skip, _n)
 assert list(_n["todo"]["peptide_id"]) == ["p0", "p1", "p2"]
 ok("redo folds everything again, ignoring what is already saved")

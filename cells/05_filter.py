@@ -91,8 +91,9 @@ else:
 # Done here rather than reused from step 4, so the hotspots, the patch radius and the
 # contact cutoff can all be changed without refolding a single design.
 PATCH = set()
-if HOT and T["template"] and os.path.isfile(T["template"]):
-    _t = gemmi.read_structure(T["template"])
+_geom = T.get("geom") or T["template"]
+if HOT and _geom and os.path.isfile(_geom):
+    _t = gemmi.read_structure(_geom)
     _ca = {}
     for r in _t[0]["A"]:
         a = r.find_atom("CA", "*")
@@ -258,6 +259,9 @@ _sub = d.set_index("peptide_id")
 for c in _sub.columns:
     if c not in _full.columns:
         _full[c] = pd.NA
+    # Compare as plain objects: a column read back from CSV may have landed on a
+    # narrower dtype than the value being written into it.
+    _full[c] = _full[c].astype(object)
 _full.update(_sub)
 _full = _full.reset_index()
 assert len(_full) == len(df), f"master.csv would lose rows ({len(_full)} vs {len(df)})"

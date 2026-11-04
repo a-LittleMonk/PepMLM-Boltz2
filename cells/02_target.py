@@ -12,7 +12,7 @@ run_name = ""  #@param {type:"string"}
 use_template = True  #@param {type:"boolean"}
 show_structure = True  #@param {type:"boolean"}
 
-import glob, hashlib, json, os, shutil, subprocess, sys, time
+import glob, hashlib, json, os, re, shutil, subprocess, sys, time
 import gemmi
 
 E = json.load(open("/content/pepmlm/env.json"))
@@ -40,7 +40,10 @@ else:
     assert os.path.isfile(src), f"not found: {src}"
 
 stem = os.path.splitext(os.path.basename(src))[0]
-RUN = (run_name.strip() or f"{stem}_{target_chain.strip()}")
+# The crop goes in the default name, so cropping differently gets its own folder
+# instead of colliding with the uncropped run's peptides.
+_auto = f"{stem}_{target_chain.strip()}" + (f"_{crop.strip()}" if crop.strip() else "")
+RUN = (run_name.strip() or _auto)
 RUN = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in RUN)
 OUT = f"{DRIVE}/{RUN}"
 for d in (OUT, f"{OUT}/structures", f"{OUT}/passing"):
@@ -75,15 +78,19 @@ print(f"chain {ch_name}: {len(res)} residues, "
 
 
 def _ranges(text):
+    """Parse '20-140,190-230'. Residue numbers may be negative, which is common in
+    expression constructs, so the split cannot simply be on '-'."""
     out = []
     for part in text.replace(" ", "").split(","):
         if not part:
             continue
-        if "-" in part.lstrip("-"):
-            a, b = part.split("-", 1)
-            out.append((int(a), int(b)))
-        else:
-            out.append((int(part), int(part)))
+        m = re.fullmatch(r"(-?\d+)(?:-(-?\d+))?", part)
+        assert m, (f"cannot read {part!r} as a residue or a range. Use e.g. 20-140, "
+                   f"or -5--1 for negative numbering.")
+        a = int(m.group(1))
+        b = int(m.group(2)) if m.group(2) is not None else a
+        assert a <= b, f"range {part!r} runs backwards"
+        out.append((a, b))
     return out
 
 
@@ -224,18 +231,38 @@ if _depth < 100:
           "Boltz will be less confident on this target")
 
 # ------------------------------------------------------------------ 7. save
-json.dump({"run": RUN, "out": OUT, "src": src, "chain": ch_name,
-           "seq": SEQ, "n_res": len(res), "crop": crop.strip(),
-           "labels": [t[0] for t in res],
-           "template": TPL if use_template else "", "msa": MSA, "apo": APO,
-           "hash": H, "max_peptide": MAX_ESM - len(SEQ)},
-          open(f"{WORK}/target.json", "w"), indent=2)
-
-print(f"\nreceptor is {len(SEQ)} residues, so the longest peptide PepMLM can take "
+# Checked before anything is written, so a target steps 3 and 4 cannot use is never
+# left on disk for them to pick up.
+print(f"receptor is {len(SEQ)} residues, so the longest peptide PepMLM can take "
       f"is {MAX_ESM - len(SEQ)}")
 assert len(SEQ) < MAX_ESM - 10, (
     f"the receptor is {len(SEQ)} residues and ESM-2 stops at {MAX_ESM}. "
     f"Crop it to the domain you care about.")
+
+# BUG guard: a run_name already used for a different receptor would share its Drive
+# folder, and step 4 would then recover a master.csv of peptides designed for that
+# other target. Refuse rather than mix them.
+_stamp = f"{OUT}/target_sequence.txt"
+if os.path.isfile(_stamp):
+    _was = open(_stamp).read().strip()
+    assert _was == SEQ, (
+        f"My Drive/{E['drive_folder']}/{RUN}/ already holds a run against a "
+        f"different receptor ({len(_was)} residues, this one is {len(SEQ)}).\n"
+        f"  Its peptides were designed for that target, so mixing them would be "
+        f"wrong.\n  Choose another run_name, or check target_chain and crop match "
+        f"what you used before.")
+open(_stamp, "w").write(SEQ + "\n")
+
+json.dump({"run": RUN, "out": OUT, "src": src, "chain": ch_name,
+           "seq": SEQ, "n_res": len(res), "crop": crop.strip(),
+           "labels": [t[0] for t in res],
+           "template": TPL if use_template else "",
+           "geom": TPL,      # always written: steps 4 and 5 measure the
+                             # hotspot patch against it, whether or not
+                             # Boltz is given it as a template
+           "msa": MSA, "apo": APO,
+           "hash": H, "max_peptide": MAX_ESM - len(SEQ)},
+          open(f"{WORK}/target.json", "w"), indent=2)
 
 # ------------------------------------------------------------------ 8. view
 if show_structure:
