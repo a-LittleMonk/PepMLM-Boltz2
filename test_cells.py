@@ -491,4 +491,37 @@ ok("an existing local table is left alone, never overwritten by the Drive copy")
 assert not os.path.isfile(_nr["recover"]("final.csv")), "must not invent a missing file"
 ok("a table that exists in neither place is simply reported missing")
 
+# ============================================== 12. step 5 is re-runnable
+print("")
+print("12. re-running the filter on a table it already filtered")
+_blk5 = io.open(os.path.join(CELLS, "05_filter.py"), encoding="utf-8").read()
+_blk5 = _blk5[_blk5.index("KD = dict("):_blk5.index('print(f"{len(d)} cofolded')]
+_base = {"peptide_id": ["a"], "sequence": ["AKDEFGHIKLMNPQR"], "iptm_pair": [0.8],
+         "ipae": [5.0], "pep_plddt": [0.85], "hotspot_contacts": [3],
+         "hotspot_fraction": [0.9]}
+_stale = {"n_cys": [9], "net_charge": [99.0], "gravy": [9.9], "liabilities": ["x"],
+          "n_liabilities": [1], "failed": ["stale"], "pass_all": [False]}
+
+
+def filt(frame):
+    n = {"pd": pd, "np": np, "re": re, "d": frame.copy(), "HOT": [4, 5],
+         "min_iptm": 0.6, "max_ipae": 10.0, "min_pep_plddt": 0.7,
+         "max_receptor_rmsd": 0.0, "min_hotspot_contacts": 2,
+         "min_hotspot_fraction": 0.6, "max_cys": 1, "charge_min": -3.0,
+         "charge_max": 5.0, "max_gravy": 1.0, "drop_liabilities": False,
+         "print": lambda *a, **k: None}
+    exec(_blk5, n)
+    return n["d"]
+
+
+_fresh = filt(pd.DataFrame(_base))
+_again = filt(pd.DataFrame({**_base, **_stale}))
+assert not _again.columns.duplicated().any(), \
+    sorted(set(_again.columns[_again.columns.duplicated()]))
+ok("a table that already holds n_cys, net_charge, gravy ... gains no duplicates")
+assert _again.at[0, "net_charge"] == _fresh.at[0, "net_charge"] != 99.0
+ok("stale sequence properties are recomputed, not kept")
+assert _again.at[0, "failed"] == _fresh.at[0, "failed"] == ""
+ok("a stale verdict is replaced by this run's")
+
 print("\nall checks passed")

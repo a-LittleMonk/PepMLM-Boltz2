@@ -175,7 +175,15 @@ def props(s):
         "n_liabilities": len(flags)})
 
 
+# Everything below is recomputed, so drop any copy left by an earlier filter run.
+# Without this, re-running step 5 on a master.csv it has already written appends a
+# second n_cys, net_charge, gravy ... and every later lookup returns two columns.
+d = d.drop(columns=[c for c in ("n_cys", "net_charge", "gravy", "liabilities",
+                                "n_liabilities", "failed", "pass_all", "rank")
+                    if c in d.columns])
 d = pd.concat([d, d["sequence"].apply(props)], axis=1)
+assert not d.columns.duplicated().any(), (
+    f"duplicated columns: {sorted(set(d.columns[d.columns.duplicated()]))}")
 
 # ------------------------------------------------------------ the gates
 G = []
@@ -193,7 +201,7 @@ if HOT:
     G.append(("wrong_face",
               d["hotspot_fraction"].astype(float) >= float(min_hotspot_fraction)))
 else:
-    print("no hotspots were given in step 2, so the two hotspot gates are skipped")
+    print("no hotspots set in this cell, so the two hotspot gates are skipped")
 G.append(("cys", d["n_cys"] <= int(max_cys)))
 G.append(("charge", d["net_charge"].between(float(charge_min), float(charge_max))))
 G.append(("gravy", d["gravy"] <= float(max_gravy)))
