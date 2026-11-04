@@ -1,5 +1,7 @@
 # PepMLM &rarr; Boltz-2 peptide binder pipeline
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/a-LittleMonk/PepMLM-Boltz2/blob/main/PepMLM_Boltz2_colab.ipynb)
+
 A Colab notebook that designs **linear peptide binders** against a target structure you
 supply, then throws away the ones that are not predicted to bind where you asked.
 
