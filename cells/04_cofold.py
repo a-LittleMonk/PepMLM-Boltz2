@@ -9,8 +9,13 @@ recycling_steps = 3  #@param {type:"integer"}
 diffusion_samples = 1  #@param {type:"integer"}
 #@markdown Cap on how many designs to attempt (0 = every one step 3 selected):
 max_designs = 0  #@param {type:"integer"}
-#@markdown The hotspot steering. `force` turns the soft hint into a hard potential —
-#@markdown leave it off, since a forced pose can look good without being real:
+#@markdown **Hotspot steering.** The residues you want the peptide to bind, in your
+#@markdown file's own numbering, e.g. `40,99,107`. This only aims the folding; what the
+#@markdown peptide actually touched is judged in step 5. Leave empty to let Boltz put
+#@markdown the peptide wherever it likes.
+hotspots = ""  #@param {type:"string"}
+#@markdown `force` turns the soft hint into a hard potential — leave it off, since a
+#@markdown forced pose can look good without being real:
 pocket_max_distance = 6.0  #@param {type:"number"}
 pocket_force = False  #@param {type:"boolean"}
 #@markdown Geometry measured afterwards. `patch_radius` defines the neighbourhood
@@ -33,9 +38,25 @@ import pandas as pd
 
 E = json.load(open("/content/pepmlm/env.json"))
 T = json.load(open("/content/pepmlm/target.json"))
-WORK, OUT, SEQ, HOT = E["work"], T["out"], T["seq"], T["hotspots_idx"]
+WORK, OUT, SEQ = E["work"], T["out"], T["seq"]
 BENV = {**os.environ, "PATH": f"{E['env']}/bin:" + os.environ.get("PATH", ""),
         "PYTHONPATH": "", "BOLTZ_CACHE": E["cache"], "HF_HOME": E["hf"]}
+
+# Hotspots, in your own numbering, translated to positions in the sequence that
+# step 2 built. They steer the folding only.
+_given = [x for x in hotspots.replace(" ", "").split(",") if x]
+_ix = {lab: i + 1 for i, lab in enumerate(T["labels"])}
+_miss = [p for p in _given if p not in _ix]
+assert not _miss, (
+    f"residue(s) {_miss} are not in the target step 2 built. Its numbering runs "
+    f"{T['labels'][0]} .. {T['labels'][-1]}, and a crop in step 2 may have removed them.")
+HOT = [_ix[p] for p in _given]
+if HOT:
+    print("steering towards:")
+    for p, i in zip(_given, HOT):
+        print(f"   {p:>6s}  ->  {SEQ[i - 1]}{i}")
+else:
+    print("no hotspots: Boltz will place the peptide wherever it prefers")
 
 df = pd.read_csv(f"{WORK}/master.csv")
 todo = df[df["selected"]].copy()

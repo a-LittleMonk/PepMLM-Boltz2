@@ -82,36 +82,30 @@ BLOCK2 = slice_of("02_target.py", "st = gemmi.read_structure(src)",
                   "# ------------------------------------------------------------------ 6. MSA")
 
 
-def run_target(crop, hotspots, chain="A"):
+def run_target(crop, chain="A"):
     ns = {"gemmi": gemmi, "src": SRC, "target_chain": chain, "crop": crop,
-          "hotspots": hotspots, "use_template": True, "WORK": TMP,
+          "use_template": True, "WORK": TMP,
           "print": lambda *a, **k: None}
     exec(BLOCK2, ns)
     return ns
 
 
-ns = run_target("", "")
+ns = run_target("")
 assert [t[0] for t in ns["res"]] == LABELS, [t[0] for t in ns["res"]]
 assert ns["SEQ"] == AA1, ns["SEQ"]
 ok(f"all 10 residues read in file order, water and chain B ignored -> {ns['SEQ']}")
 assert len(ns["gaps"]) == 1 and ns["gaps"][0][:2] == ("22", "41"), ns["gaps"]
 ok("the 22 -> 41 gap is reported, the insertion code does not create a false gap")
 
-ns = run_target("", "18,41")
-assert ns["HOT"] == [2, 8], ns["HOT"]
-ok("hotspots 18 and 41 map to sequence positions 2 and 8")
-
-ns = run_target("17-22", "20A")
+ns = run_target("17-22")
 assert [t[0] for t in ns["res"]] == ["17", "18", "19", "20", "20A", "21", "22"]
-assert ns["HOT"] == [5], ns["HOT"]
-ok("crop 17-22 keeps 7 residues (20A included) and 20A maps to position 5")
+ok("crop 17-22 keeps 7 residues, the insertion code 20A among them")
 
-ns = run_target("17-19,41-43", "")
+ns = run_target("17-19,41-43")
 assert ns["SEQ"] == "ACD" + "ILK"[:0] + "IKL"[:0] + AA1[7:10], ns["SEQ"]
 ok(f"two-range crop 17-19,41-43 gives {ns['SEQ']}")
 
-for bad, why in ((("", "99"), "a residue that does not exist"),
-                 (("500-600", ""), "a crop that selects nothing")):
+for bad, why in ((("500-600",), "a crop that selects nothing"),):
     try:
         run_target(*bad)
         raise AssertionError(f"should have refused {why}")
@@ -121,14 +115,14 @@ for bad, why in ((("", "99"), "a residue that does not exist"),
     ok(f"refuses {why}")
 
 try:
-    run_target("", "", chain="Z")
+    run_target("", chain="Z")
     raise AssertionError("should have refused a missing chain")
 except AssertionError as e:
     if "should have" in str(e):
         raise
 ok("refuses a chain that is not in the file")
 
-ns = run_target("", "18,41")
+ns = run_target("")
 tpl = gemmi.read_structure(ns["TPL"])
 nums = [r.seqid.num for r in tpl[0]["A"]]
 assert nums == list(range(1, 11)), nums
@@ -350,8 +344,8 @@ def resolve(text):
     return n["HOT"]
 
 
-assert resolve("") == [2, 8], resolve("")
-ok("empty field falls back to step 2's hotspots")
+assert resolve("") == [], resolve("")
+ok("an empty field means no hotspot gates, not step 2's leftovers")
 assert resolve("19,20A,43") == [3, 5, 10], resolve("19,20A,43")
 ok("an override maps your own numbering, insertion code included, to 3, 5 and 10")
 try:
@@ -398,5 +392,33 @@ assert list(_out["failed"].fillna("")) == ["", "iptm", "", "", ""]
 ok("the filter's new columns are merged onto the cofolded rows only")
 assert _out.set_index("peptide_id").at["p0", "iptm_pair"] == 0.81
 ok("re-measured values overwrite step 4's, and uncofolded rows stay empty")
+
+# ============================================== 9. step 4's steering hotspots
+print("\n9. step 4 resolves its own steering hotspots")
+_c4 = io.open(os.path.join(CELLS, "04_cofold.py"), encoding="utf-8").read()
+_blk = _c4[_c4.index("# Hotspots, in your own numbering"):
+           _c4.index('df = pd.read_csv(f"{WORK}/master.csv")')]
+
+
+def steer(text):
+    n = {"T": {"labels": LABELS}, "SEQ": AA1, "hotspots": text,
+         "print": lambda *a, **k: None}
+    exec(_blk, n)
+    return n["HOT"]
+
+
+assert steer("") == [], steer("")
+ok("empty means no pocket constraint is emitted at all")
+assert steer("18, 41") == [2, 8], steer("18, 41")
+ok("spaces are tolerated and 18, 41 become positions 2 and 8")
+assert steer("20A") == [5], steer("20A")
+ok("an insertion code resolves, same as in the filter")
+try:
+    steer("777")
+    raise AssertionError("should have refused a residue outside the target")
+except AssertionError as e:
+    if "should have" in str(e):
+        raise
+ok("refuses a residue the target does not contain, before any folding starts")
 
 print("\nall checks passed")

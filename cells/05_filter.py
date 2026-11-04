@@ -17,11 +17,10 @@ max_receptor_rmsd = 0.0  #@param {type:"number"}
 #@markdown binds confidently to the wrong face.
 min_hotspot_contacts = 2  #@param {type:"integer"}
 min_hotspot_fraction = 0.6  #@param {type:"number"}
-#@markdown Leave `hotspots` empty to use the ones from step 2. Fill it in to ask a
-#@markdown different question of the same designs — in **your file's own numbering**,
-#@markdown e.g. `40,99,107`. Nothing is refolded: the contacts are re-measured from the
-#@markdown structures already saved, so `patch_radius` and `contact_cutoff` work here
-#@markdown too.
+#@markdown The residues the peptide must actually have bound, in **your file's own
+#@markdown numbering**, e.g. `40,99,107`. Independent of step 4's steering: change it
+#@markdown and the contacts are re-measured from the structures already saved, so
+#@markdown nothing is refolded. Leave empty to skip both hotspot gates.
 hotspots = ""  #@param {type:"string"}
 patch_radius = 10.0  #@param {type:"number"}
 contact_cutoff = 4.5  #@param {type:"number"}
@@ -71,7 +70,8 @@ if _given:
     for p, i in zip(_given, HOT):
         print(f"   {p:>6s}  ->  {T['seq'][i - 1]}{i}")
 else:
-    HOT = T["hotspots_idx"]
+    HOT = []
+    print("no hotspots set here, so the two hotspot gates are skipped")
 
 # ------------------------------------------------------------ re-measure geometry
 # Done here rather than reused from step 4, so the hotspots, the patch radius and the
@@ -248,7 +248,10 @@ json.dump({"min_iptm": float(min_iptm), "max_ipae": float(max_ipae),
            "min_hotspot_fraction": float(min_hotspot_fraction),
            "max_cys": int(max_cys), "charge": [float(charge_min), float(charge_max)],
            "max_gravy": float(max_gravy), "drop_liabilities": bool(drop_liabilities),
-           "rank_by": rank_by, "n_pass": int(len(final))},
+           "rank_by": rank_by, "n_pass": int(len(final)),
+           "hotspots_raw": hotspots.strip(), "hotspots_idx": HOT,
+           "patch_radius": float(patch_radius),
+           "contact_cutoff": float(contact_cutoff)},
           open(f"{OUT}/filter_settings.json", "w"), indent=2)
 print(f"\nmaster.csv  {len(_full)} peptides generated, {len(d)} of them cofolded, "
       f"every metric, unfiltered")

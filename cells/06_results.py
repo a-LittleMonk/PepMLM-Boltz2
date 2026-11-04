@@ -11,7 +11,10 @@ import py3Dmol
 
 E = json.load(open("/content/pepmlm/env.json"))
 T = json.load(open("/content/pepmlm/target.json"))
-WORK, OUT, HOT = E["work"], T["out"], T["hotspots_idx"]
+WORK, OUT = E["work"], T["out"]
+# whichever hotspots step 5 last judged against
+_fs = f"{OUT}/filter_settings.json"
+HOT = json.load(open(_fs)).get("hotspots_idx", []) if os.path.isfile(_fs) else []
 
 if which.startswith("passing"):
     d = pd.read_csv(f"{WORK}/final.csv")

@@ -1,7 +1,5 @@
 # PepMLM &rarr; Boltz-2 peptide binder pipeline
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/a-LittleMonk/PepMLM-Boltz2/blob/main/PepMLM_Boltz2_colab.ipynb)
-
 A Colab notebook that designs **linear peptide binders** against a target structure you
 supply, then throws away the ones that are not predicted to bind where you asked.
 
@@ -24,30 +22,37 @@ This notebook is the missing half.
 | Step | | Cost |
 |---|---|---|
 | 1 | Set up everything | ~20 min, once per session |
-| 2 | Target: chain, crop, hotspots | ~2 min, builds the receptor MSA once |
+| 2 | Target: chain and crop | ~2 min, builds the receptor MSA once |
 | 3 | Generate thousands of peptides, gate on perplexity | minutes |
-| 4 | Cofold the survivors with Boltz-2 | **hours — the entire cost** |
+| 4 | Cofold the survivors with Boltz-2, steered at your hotspots | **hours — the entire cost** |
 | 5 | Filter on interface, hotspots and synthesisability | seconds |
 | 6 | Look at a result | — |
 
 Steps 3, 4 and 5 are separate deliberately: re-filter without re-folding, re-fold
 without re-generating.
 
-## Hotspots, used twice
+## Hotspots, in two independent places
 
-Give the residues you want hit, **in your own file's numbering**, and they are used at
-both ends of the pipeline:
+Give the residues you want hit **in your own file's numbering**, and give them to
+whichever of the two steps you mean. They are deliberately separate:
 
-- **Steering.** Boltz-2 takes a native `pocket` constraint, so the peptide is folded
-  against the site you named instead of wherever the model prefers.
-- **Judging.** After folding, the notebook measures which receptor residues the peptide
-  actually touches. `hotspot_contacts` counts your residues that were hit;
+- **Step 4 steers.** Boltz-2 takes a native `pocket` constraint, so the peptide is
+  folded against the site you named instead of wherever the model prefers. Leave it
+  empty to let Boltz choose freely.
+- **Step 5 judges.** After folding, it measures which receptor residues the peptide
+  actually touches. `hotspot_contacts` counts how many of yours were hit;
   `hotspot_fraction` is the share of all its contacts landing on the patch around them.
   That second number is what removes a peptide that binds confidently **to the wrong
   face** — a failure the confidence metrics alone will happily pass.
 
-Step 2 prints the residue each hotspot number resolves to and draws them in 3D, because
-this is the easy thing to get wrong.
+Keeping them apart means you can fold once and then ask several different questions of
+the same designs. Changing step 5's hotspots, `patch_radius` or `contact_cutoff`
+re-measures from the saved structures and refolds nothing, so it costs seconds. Both
+steps print the residue each number resolves to, and refuse a residue the target does
+not contain before doing any work.
+
+Step 2 holds no hotspots at all. It only defines the target: the chain, the crop, the
+template and the alignment.
 
 ## Design decisions worth knowing
 
@@ -147,7 +152,8 @@ python -I test_cells.py # 20 checks: numbering, YAML, contact geometry, filter g
 
 `test_cells.py` runs without a GPU. It builds a deliberately awkward PDB — non-sequential
 numbering, a chain break, an insertion code, a water, a second chain — and checks the
-crop and hotspot mapping against it, validates the emitted YAML, measures contacts on
+crop against it, checks the hotspot mapping in both steps that do it, validates the
+emitted YAML, measures contacts on
 synthetic complexes placed on the right and wrong faces, and drives each filter gate with
 a design built to fail exactly that gate.
 

@@ -166,7 +166,7 @@ json.dump({"length_min": int(length_min), "length_max": int(length_max),
            "n_per_length": int(n_per_length), "top_k": int(top_k), "gate": gate,
            "keep_top_n": int(keep_top_n), "ppl_cutoff": float(ppl_cutoff),
            "precision": precision, "seed": int(seed),
-           "receptor_len": len(SEQ), "hotspots": T["hotspots_raw"],
+           "receptor_len": len(SEQ),
            "crop": T["crop"], "chain": T["chain"], "source": T["src"]},
           open(f"{OUT}/settings.json", "w"), indent=2)
 print(f"\nmaster.csv written to My Drive/{E['drive_folder']}/{T['run']}/")

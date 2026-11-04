@@ -6,7 +6,7 @@
 | `iptm_pair` | Boltz-2 interface confidence, receptor&ndash;peptide specifically | >0.6 interesting, >0.75 good |
 | `ipae` | interface predicted error, &aring;ngstroms | <10 interesting, <7 good |
 | `pep_plddt` | is the peptide itself confidently placed | >0.7 |
-| `hotspot_contacts` | how many of your residues it actually touches | the more the better |
+| `hotspot_contacts` | how many of step 5's residues it actually touches | the more the better |
 | `hotspot_fraction` | share of its contacts on the patch around your hotspots | <0.5 means it is on the wrong face |
 | `receptor_rmsd` | how far the receptor moved vs. the free prediction | large = a pose that needs the target to deform |
 | `net_charge`, `gravy`, `n_cys`, `liabilities` | can you actually make it | see step 5 |

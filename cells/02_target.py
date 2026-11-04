@@ -7,9 +7,6 @@ target_chain = "A"  #@param {type:"string"}
 #@markdown Region to keep, **in your file's own residue numbering** — e.g. `20-140`,
 #@markdown or several ranges `20-140,190-230`. Leave empty to use the whole chain.
 crop = ""  #@param {type:"string"}
-#@markdown The residues you want the peptide to bind, **in your file's own numbering**
-#@markdown — e.g. `40,99,107`. Leave empty for no hotspot steering.
-hotspots = ""  #@param {type:"string"}
 #@markdown Name for this run's output folder (empty = derived from the filename):
 run_name = ""  #@param {type:"string"}
 use_template = True  #@param {type:"boolean"}
@@ -118,28 +115,8 @@ if gaps:
           f"the models joins them as if continuous:")
     for a, b, n in gaps[:8]:
         print(f"     {a} -> {b}   ({n} residue(s) missing)")
-    print("   If a gap sits near your hotspots, crop to a gap-free stretch instead.")
-
-# ------------------------------------------------------------------ 4. hotspots
-HOT = []
-if hotspots.strip():
-    labels = [p for p in hotspots.replace(" ", "").split(",") if p]
-    index = {t[0]: i + 1 for i, t in enumerate(res)}
-    print("\nhotspots (your numbering -> what the models will see):")
-    missing = []
-    for lab in labels:
-        if lab in index:
-            i = index[lab]
-            HOT.append(i)
-            print(f"   {lab:>6s}  ->  {SEQ[i - 1]}{i}   (sequence position {i})")
-        else:
-            missing.append(lab)
-    assert not missing, (
-        f"residue(s) {missing} are not in chain {ch_name} after cropping.\n"
-        f"  available numbering: {res[0][0]} .. {res[-1][0]}")
-else:
-    print("\nno hotspots given: Boltz will not be steered, and the filter cannot "
-          "check where the peptide landed")
+    print("   If a gap sits in the region you care about, crop to a gap-free "
+          "stretch instead.")
 
 # ------------------------------------------------------------------ 5. template
 tpl = gemmi.Structure()
@@ -250,7 +227,6 @@ if _depth < 100:
 json.dump({"run": RUN, "out": OUT, "src": src, "chain": ch_name,
            "seq": SEQ, "n_res": len(res), "crop": crop.strip(),
            "labels": [t[0] for t in res],
-           "hotspots_idx": HOT, "hotspots_raw": hotspots.strip(),
            "template": TPL if use_template else "", "msa": MSA, "apo": APO,
            "hash": H, "max_peptide": MAX_ESM - len(SEQ)},
           open(f"{WORK}/target.json", "w"), indent=2)
@@ -259,7 +235,7 @@ print(f"\nreceptor is {len(SEQ)} residues, so the longest peptide PepMLM can tak
       f"is {MAX_ESM - len(SEQ)}")
 assert len(SEQ) < MAX_ESM - 10, (
     f"the receptor is {len(SEQ)} residues and ESM-2 stops at {MAX_ESM}. "
-    f"Crop it to a domain around your hotspots.")
+    f"Crop it to the domain you care about.")
 
 # ------------------------------------------------------------------ 8. view
 if show_structure:
@@ -267,17 +243,7 @@ if show_structure:
     v = py3Dmol.view(width=760, height=460)
     v.addModel(open(TPL).read(), "cif")
     v.setStyle({"cartoon": {"color": "grey", "opacity": 0.85}})
-    if HOT:
-        v.addStyle({"resi": [str(i) for i in HOT]},
-                   {"stick": {"colorscheme": "pinkCarbon", "radius": 0.28}})
-        v.addStyle({"resi": [str(i) for i in HOT]},
-                   {"cartoon": {"color": "magenta"}})
-        for lab, i in zip([p for p in hotspots.replace(" ", "").split(",") if p], HOT):
-            v.addLabel(f"{SEQ[i - 1]}{lab}",
-                       {"fontSize": 11, "backgroundColor": "white",
-                        "fontColor": "black", "backgroundOpacity": 0.75},
-                       {"resi": str(i)})
     v.zoomTo()
     v.show()
-    print("grey = target, pink sticks = your hotspots. Labels show YOUR numbering.")
-    print("If the pink residues are not where you meant, fix `hotspots` and re-run.")
+    print("This is the target as steps 3 and 4 will see it. Hotspots are set in"
+          " step 4 (to steer the folding) and step 5 (to judge the result).")

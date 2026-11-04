@@ -14,9 +14,9 @@ This notebook supplies the filter.
 | | | cost |
 |---|---|---|
 | 1 | Set up everything | ~20 min, once per session |
-| 2 | Target: chain, crop, hotspots | ~2 min (builds the receptor MSA once) |
+| 2 | Target: chain and crop | ~2 min (builds the receptor MSA once) |
 | 3 | Generate a few thousand peptides and gate on perplexity | minutes |
-| 4 | Cofold the survivors with Boltz-2 | **hours — this is the whole cost** |
+| 4 | Cofold the survivors, steered at your hotspots | **hours — this is the whole cost** |
 | 5 | Filter on interface quality, hotspots and synthesisability | seconds |
 | 6 | Look at a result | — |
 
