@@ -9,7 +9,7 @@ import os
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-NOTEBOOK_VERSION = "1.2.0"
+NOTEBOOK_VERSION = "1.2.1"
 OUT = os.path.join(HERE, "PepMLM_Boltz2_colab.ipynb")
 
 ORDER = [

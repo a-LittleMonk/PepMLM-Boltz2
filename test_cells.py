@@ -421,4 +421,49 @@ except AssertionError as e:
         raise
 ok("refuses a residue the target does not contain, before any folding starts")
 
+# ============================================== 10. step 4's resume behaviour
+print("\n10. resuming step 4 after a disconnect")
+_src4 = io.open(os.path.join(CELLS, "04_cofold.py"), encoding="utf-8").read()
+
+# a) designs already folded in an earlier session are skipped
+_skip = _src4[_src4.index("# Skip anything already folded"):
+              _src4.index("if max_designs and len(todo)")]
+_rdir = TMP + "/resume"
+os.makedirs(_rdir + "/structures", exist_ok=True)
+_df = pd.DataFrame({"peptide_id": ["p0", "p1", "p2"],
+                    "selected": [True, True, True],
+                    "cofolded": [True, True, False],
+                    "perplexity": [1.0, 2.0, 3.0]})
+io.open(_rdir + "/structures/p0.cif", "w").write("x")   # p1 has metrics but no file
+_n = {"df": _df, "todo": _df[_df["selected"]].copy(), "os": os, "redo": False,
+      "OUT": _rdir, "print": lambda *a, **k: None}
+exec(_skip, _n)
+assert list(_n["todo"]["peptide_id"]) == ["p1", "p2"], list(_n["todo"]["peptide_id"])
+ok("p0 is skipped; p1 is refolded because its structure is missing from Drive")
+
+_n = {"df": _df, "todo": _df[_df["selected"]].copy(), "os": os, "redo": True,
+      "OUT": _rdir, "print": lambda *a, **k: None}
+exec(_skip, _n)
+assert list(_n["todo"]["peptide_id"]) == ["p0", "p1", "p2"]
+ok("redo folds everything again, ignoring what is already saved")
+
+# b) a half-written prediction folder is cleared, not skipped for ever
+import textwrap
+_part = textwrap.dedent(
+    "    " + _src4[_src4.index("_part = [p for p in ch"):
+                   _src4.index("have = sum(")])
+_pred = TMP + "/pred"
+for _p, _complete in (("good", True), ("cut_off", False)):
+    os.makedirs(_pred + "/" + _p, exist_ok=True)
+    if _complete:
+        io.open(_pred + "/" + _p + "/confidence_" + _p + "_model_0.json", "w").write("{}")
+_n = {"ch": ["good", "cut_off", "never_started"], "pred": _pred, "os": os,
+      "shutil": __import__("shutil"), "ci": 0, "print": lambda *a, **k: None}
+exec(_part, _n)
+assert _n["_part"] == ["cut_off"], _n["_part"]
+assert os.path.isdir(_pred + "/good"), "a finished design must be kept"
+assert not os.path.isdir(_pred + "/cut_off"), "the half-written folder must be removed"
+ok("an interrupted design's empty folder is deleted, so Boltz retries it")
+ok("a finished design keeps its folder and is skipped")
+
 print("\nall checks passed")

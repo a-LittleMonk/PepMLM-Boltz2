@@ -60,9 +60,21 @@ else:
 
 df = pd.read_csv(f"{WORK}/master.csv")
 todo = df[df["selected"]].copy()
+assert len(todo), "step 3 selected nothing to cofold"
+_want = len(todo)
+
+# Skip anything already folded in an earlier session: its metrics are in master.csv
+# and its structure is in Drive, so there is nothing to recompute. This is what makes
+# a fresh session cheap after a disconnect, since the local predictions are gone.
+if not redo and "cofolded" in df.columns:
+    _have = {p for p in df.loc[df["cofolded"].eq(True), "peptide_id"]
+             if os.path.isfile(f"{OUT}/structures/{p}.cif")}
+    if _have:
+        todo = todo[~todo["peptide_id"].isin(_have)]
+        print(f"{len(_have)} design(s) already folded and saved in Drive, skipping them"
+              f"{'  (tick redo to fold them again)' if len(_have) else ''}")
 if max_designs and len(todo) > int(max_designs):
     todo = todo.nsmallest(int(max_designs), "perplexity")
-assert len(todo), "step 3 selected nothing to cofold"
 
 YD, CD = f"{WORK}/yaml", f"{WORK}/cofold"
 if redo:
@@ -239,6 +251,16 @@ t0, finished = time.time(), 0
 for ci, ch in enumerate(chunks):
     d, od = f"{YD}/c{ci:03d}", f"{CD}/c{ci:03d}"
     pred = f"{od}/boltz_results_c{ci:03d}/predictions"
+    # Boltz treats a design as done if its output FOLDER exists, without looking
+    # inside. A run cut off mid-write leaves an empty folder, which it would then skip
+    # for ever. Clear those out so an interrupted design is actually retried.
+    _part = [p for p in ch if os.path.isdir(f"{pred}/{p}")
+             and not os.path.isfile(f"{pred}/{p}/confidence_{p}_model_0.json")]
+    for p in _part:
+        shutil.rmtree(f"{pred}/{p}", ignore_errors=True)
+    if _part:
+        print(f"chunk {ci + 1}: cleared {len(_part)} half-written design(s) so they "
+              f"are retried")
     have = sum(1 for p in ch
                if os.path.isfile(f"{pred}/{p}/confidence_{p}_model_0.json"))
     if have == len(ch):
@@ -323,9 +345,12 @@ for ci, ch in enumerate(chunks):
 
 df = tidy(df)
 ok = df["cofolded"] if "cofolded" in df else pd.Series(False, index=df.index)
-print(f"\ncofolded {int(ok.sum())} of {len(ids)} in {(time.time() - t0) / 60:.1f} min")
-if int(ok.sum()) < len(ids):
-    print("   some designs produced no output; re-running this cell retries only those")
+print(f"\n{int(ok.sum())} of {_want} selected design(s) now have results"
+      + (f"; {len(ids)} folded here in {(time.time() - t0) / 60:.1f} min"
+         if ids else "; nothing needed folding"))
+if int(ok.sum()) < _want:
+    print(f"   {_want - int(ok.sum())} still missing. Re-run this cell: finished "
+          f"designs are skipped and half-written ones are cleared and retried.")
 cols = [c for c in ["peptide_id", "length", "sequence", "perplexity", "iptm_pair",
                     "ipae", "pep_plddt", "hotspot_contacts", "hotspot_fraction"]
         if c in df.columns]
